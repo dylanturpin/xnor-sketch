@@ -87,8 +87,6 @@ function dataset:__init(...)
 
    if not self.sampleHookTrain then self.sampleHookTrain = self.defaultSampleHook end
    if not self.sampleHookTest then self.sampleHookTest = self.defaultSampleHook end
-
-   loaded = mattorch.load('/home/dylanturpin/data/sketchANet/lua_dataset_without_order_info_256.mat')
 end
 
 -- size(), size(class)
@@ -115,7 +113,7 @@ local function tableToOutput(self, dataTable, scalarTable)
    local data, scalarLabels, labels
    local quantity = #scalarTable
 
-   assert(dataTable[1]:dim() == opt.nChannels)
+   assert(dataTable[1]:dim() == 3)
    data = torch.Tensor(quantity,
 		       self.sampleSize[1], self.sampleSize[2], self.sampleSize[3])
    scalarLabels = torch.LongTensor(quantity):fill(-1111)
@@ -133,11 +131,12 @@ function dataset:sample(quantity)
    local scalarTable = {}
    for i=1,quantity do
       -- get a random image, convert from byte tensort to float tensor
-      local randomIndex = torch.random(1, loaded.data:size(1));
-      local out = loaded.data[{randomIndex,{},{},{}}]:float()
+      local randomIndex = torch.random(1, loaded.trainImages:size(1))
+      local out = loaded.trainImages[{randomIndex,{},{},{}}]:float()
+      out = self:sampleHookTrain(out)
 
       table.insert(dataTable, out)
-      table.insert(scalarTable, loaded.labels[randomIndex])
+      table.insert(scalarTable, loaded.trainLabels[randomIndex])
    end
    local data, scalarLabels = tableToOutput(self, dataTable, scalarTable)
    return data, scalarLabels
@@ -152,8 +151,9 @@ function dataset:get(i1, i2)
    local scalarTable = {}
    for i=1,quantity do
       -- load the sample
-      local imgpath = ffi.string(torch.data(self.imagePath[indices[i]]))
-      local out = self:sampleHookTest(imgpath)
+      local out = loaded.validationImages[{indices[i],{},{},{}}]:float()
+      out = self:sampleHookTest(imgpath)
+
       table.insert(dataTable, out)
       table.insert(scalarTable, self.imageClass[indices[i]])
    end
