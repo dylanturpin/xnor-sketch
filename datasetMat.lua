@@ -115,7 +115,7 @@ local function tableToOutput(self, dataTable, scalarTable)
    local data, scalarLabels, labels
    local quantity = #scalarTable
 
-   assert(dataTable[1]:dim() == 3)
+   assert(dataTable[1]:dim() == opt.nChannels)
    data = torch.Tensor(quantity,
 		       self.sampleSize[1], self.sampleSize[2], self.sampleSize[3])
    scalarLabels = torch.LongTensor(quantity):fill(-1111)
