@@ -93,7 +93,7 @@ end
 function dataset:size(class, list)
    list = list or self.classList
    if not class then
-      return self.numSamples
+      return loaded.validationLabels:size()[1]
    elseif type(class) == 'string' then
       return list[self.classIndices[class]]:size(1)
    elseif type(class) == 'number' then
@@ -152,10 +152,10 @@ function dataset:get(i1, i2)
    for i=1,quantity do
       -- load the sample
       local out = loaded.validationImages[{indices[i],{},{},{}}]:float()
-      out = self:sampleHookTest(imgpath)
+      out = self:sampleHookTest(out)
 
       table.insert(dataTable, out)
-      table.insert(scalarTable, self.imageClass[indices[i]])
+      table.insert(scalarTable, loaded.validationLabels[indices[i]])
    end
    local data, scalarLabels = tableToOutput(self, dataTable, scalarTable)
    return data, scalarLabels
