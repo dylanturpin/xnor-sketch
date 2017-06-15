@@ -39,7 +39,7 @@ torch.manualSeed(opt.manualSeed)
 print('Saving everything to: ' .. opt.save)
 os.execute('mkdir -p ' .. opt.save)
 
-loaded = mattorch.load('/u/dylanturpin/data/sketchANet/lua_dataset_without_order_info_256.mat')
+loaded = mattorch.load(opt.data)
 
 paths.dofile('data.lua')
 paths.dofile('train.lua')

@@ -19,32 +19,9 @@ local trainCache = paths.concat(opt.cache, 'trainCache.t7')
 local testCache = paths.concat(opt.cache, 'testCache.t7')
 local meanstdCache = paths.concat(opt.cache, 'meanstdCache.t7')
 
--- Check for existence of opt.data
-if not os.execute('cd ' .. opt.data) then
-    error(("could not chdir to '%s'"):format(opt.data))
-end
-
 local loadSize   = {opt.nChannels, opt.imageSize, opt.imageSize}
 local sampleSize = {opt.nChannels, opt.cropSize, opt.cropSize}
 
-
-local function loadImage(path)
-
-   local input = image.load(path, 3, 'float')
-
-   local random_scale = 1+torch.rand(1)[1]*opt.scalingFactor--(224/256) = 0.875
-   if opt.testMode  then
-      random_scale =1;
-   end
-
-   -- find the smaller dimension, and resize it to loadSize (while keeping aspect ratio)
-   if input:size(3) < input:size(2) then
-      input = image.scale(input, loadSize[2]*random_scale, loadSize[3]*random_scale* input:size(2) / input:size(3))
-   else
-      input = image.scale(input, loadSize[2]*random_scale * input:size(3) / input:size(2), loadSize[3]*random_scale)
-   end
-   return input
-end
 
 -- channel-wise mean and std. Calculate or load them from disk later in the script.
 local mean,std
@@ -92,20 +69,12 @@ if paths.filep(trainCache) then
    print('Loading train metadata from cache')
    trainLoader = torch.load(trainCache)
    trainLoader.sampleHookTrain = trainHook
-   --assert(trainLoader.paths[1] == paths.concat(opt.data, 'train'),
-   --       'cached files dont have the same path as opt.data. Remove your cached files at: '
-   --          .. trainCache .. ' and rerun the program')
-   if trainLoader.paths[1] ~= paths.concat(opt.data, 'train') then
-      trainLoader.paths[1] = paths.concat(opt.data, 'train');
-   end
-
 else
    print('Creating train metadata')
+
    trainLoader = dataLoader{
-      paths = {paths.concat(opt.data, 'train')},
       loadSize = loadSize,
       sampleSize = sampleSize,
-      split = 100,
       verbose = true
    }
    torch.save(trainCache, trainLoader)
@@ -143,19 +112,11 @@ if paths.filep(testCache) then
    print('Loading test metadata from cache')
    testLoader = torch.load(testCache)
    testLoader.sampleHookTest = testHook
-   --assert(testLoader.paths[1] == paths.concat(opt.data, 'val'),
-   --       'cached files dont have the same path as opt.data. Remove your cached files at: '
-   --          .. testCache .. ' and rerun the program')
-   if testLoader.paths[1] ~= paths.concat(opt.data, 'val') then
-      testLoader.paths[1] = paths.concat(opt.data, 'val');
-   end
 else
    print('Creating test metadata')
    testLoader = dataLoader{
-      paths = {paths.concat(opt.data, 'val')},
       loadSize = loadSize,
       sampleSize = sampleSize,
-      split = 0,
       verbose = true,
       forceClasses = trainLoader.classes -- force consistent class indices between trainLoader and testLoader
    }

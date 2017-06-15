@@ -12,58 +12,24 @@ require 'image'
 local dataset = torch.class('dataLoader')
 os.execute('mkdir ' .. opt.cache .. '/tmp');
 local initcheck = argcheck{
-   pack=true,
+   pack=false,
    help=[[
-     A dataset class for images in a flat folder structure (folder-name is class-name).
-     Optimized for extremely large datasets (upwards of 14 million images).
-     Tested only on Linux (as it uses command-line linux utilities to scale up)
+     A dataset class for images in matlab (.mat) datafile.
 ]],
-   {check=function(paths)
-       local out = true;
-       for k,v in ipairs(paths) do
-          if type(v) ~= 'string' then
-             print('paths can only be of string input');
-             out = false
-          end
-       end
-       return out
-   end,
-    name="paths",
-    type="table",
-    help="Multiple paths of directories with images"},
 
    {name="sampleSize",
     type="table",
     help="a consistent sample size to resize the images"},
-
-   {name="split",
-    type="number",
-    help="Percentage of split to go to Training"
-   },
-
-   {name="samplingMode",
-    type="string",
-    help="Sampling mode: random | balanced ",
-    default = "balanced"},
-
-   {name="verbose",
-    type="boolean",
-    help="Verbose mode during initialization",
-    default = false},
 
    {name="loadSize",
     type="table",
     help="a size to load the images to, initially",
     opt = true},
 
-   {name="forceClasses",
-    type="table",
-    help="If you want this loader to map certain classes to certain indices, "
-       .. "pass a classes table that has {classname : classindex} pairs."
-       .. " For example: {3 : 'dog', 5 : 'cat'}"
-       .. "This function is very useful when you want two loaders to have the same "
-    .. "class indices (trainLoader/testLoader for example)",
-    opt = true},
+   {name="verbose",
+    type="boolean",
+    help="Verbose mode during initialization",
+    default = false},
 
    {name="sampleHookTrain",
     type="function",
@@ -74,7 +40,7 @@ local initcheck = argcheck{
    {name="sampleHookTest",
     type="function",
     help="applied to sample during testing",
-    opt = true},
+    opt = true}
 }
 
 function dataset:__init(...)
@@ -114,6 +80,7 @@ local function tableToOutput(self, dataTable, scalarTable)
    local quantity = #scalarTable
 
    assert(dataTable[1]:dim() == 3)
+
    data = torch.Tensor(quantity,
 		       self.sampleSize[1], self.sampleSize[2], self.sampleSize[3])
    scalarLabels = torch.LongTensor(quantity):fill(-1111)

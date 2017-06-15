@@ -17,7 +17,7 @@ function M.parse(arg)
     ------------ General options --------------------
 
     cmd:option('-cache', './cache/', 'subdirectory in which to save/log experiments')
-    cmd:option('-data', './imagenet/imagenet_raw_images/256', 'Home of ImageNet dataset')
+    cmd:option('-data', './imagenet/imagenet_raw_images/256', 'Home of ImageNet dataset, or path to sketches mat file')
     cmd:option('-dataset',  'imagenet', 'Dataset Name: imagenet |cifar')
     cmd:option('-manualSeed',         2, 'Manually set RNG seed')
     cmd:option('-GPU',                1, 'Default preferred GPU')
