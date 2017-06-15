@@ -75,7 +75,9 @@ else
    trainLoader = dataLoader{
       loadSize = loadSize,
       sampleSize = sampleSize,
-      verbose = true
+      verbose = true,
+      imagesFieldName = 'trainImages',
+      labelsFieldName = 'trainLabels'
    }
    torch.save(trainCache, trainLoader)
    trainLoader.sampleHookTrain = trainHook
@@ -118,7 +120,9 @@ else
       loadSize = loadSize,
       sampleSize = sampleSize,
       verbose = true,
-      forceClasses = trainLoader.classes -- force consistent class indices between trainLoader and testLoader
+      forceClasses = trainLoader.classes, -- force consistent class indices between trainLoader and testLoader
+      imagesFieldName = 'validationImages',
+      labelsFieldName = 'validationLabels'
    }
    torch.save(testCache, testLoader)
    testLoader.sampleHookTest = testHook

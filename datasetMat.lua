@@ -40,6 +40,16 @@ local initcheck = argcheck{
    {name="sampleHookTest",
     type="function",
     help="applied to sample during testing",
+    opt = true},
+
+   {name="imagesFieldName",
+    type="string",
+    help="name of the images field name in the loaded mat file",
+    opt = true},
+
+   {name="labelsFieldName",
+    type="string",
+    help="name of the labels field name in the loaded mat file",
     opt = true}
 }
 
@@ -59,19 +69,12 @@ end
 function dataset:size(class, list)
    list = list or self.classList
    if not class then
-      return loaded.validationLabels:size()[1]
+      return loaded[self.labelsFieldName]:size()[1]
    elseif type(class) == 'string' then
       return list[self.classIndices[class]]:size(1)
    elseif type(class) == 'number' then
       return list[class]:size(1)
    end
-end
-
--- getByClass
-function dataset:getByClass(class)
-   local index = math.max(1, math.ceil(torch.uniform() * self.classListSample[class]:nElement()))
-   local imgpath = ffi.string(torch.data(self.imagePath[self.classListSample[class][index]]))
-   return self:sampleHookTrain(imgpath)
 end
 
 -- converts a table of samples (and corresponding labels) to a clean tensor
@@ -98,12 +101,12 @@ function dataset:sample(quantity)
    local scalarTable = {}
    for i=1,quantity do
       -- get a random image, convert from byte tensort to float tensor
-      local randomIndex = torch.random(1, loaded.trainImages:size(1))
-      local out = loaded.trainImages[{randomIndex,{},{},{}}]:float()
+      local randomIndex = torch.random(1, loaded[self.imagesFieldName]:size(1))
+      local out = loaded[self.imagesFieldName][{randomIndex,{},{},{}}]:float()
       out = self:sampleHookTrain(out)
 
       table.insert(dataTable, out)
-      table.insert(scalarTable, loaded.trainLabels[randomIndex])
+      table.insert(scalarTable, loaded[self.labelsFieldName][randomIndex])
    end
    local data, scalarLabels = tableToOutput(self, dataTable, scalarTable)
    return data, scalarLabels
@@ -118,11 +121,11 @@ function dataset:get(i1, i2)
    local scalarTable = {}
    for i=1,quantity do
       -- load the sample
-      local out = loaded.validationImages[{indices[i],{},{},{}}]:float()
+      local out = loaded[self.imagesFieldName][{indices[i],{},{},{}}]:float()
       out = self:sampleHookTest(out)
 
       table.insert(dataTable, out)
-      table.insert(scalarTable, loaded.validationLabels[indices[i]])
+      table.insert(scalarTable, loaded[self.labelsFieldName][indices[i]])
    end
    local data, scalarLabels = tableToOutput(self, dataTable, scalarTable)
    return data, scalarLabels
