@@ -30,6 +30,7 @@ else
    model = createModel(opt.nGPU) -- for the model creation code, check the models/ folder
    --Initializing the parameters 
    model:apply(rand_initialize)
+   
    if opt.loadParams ~= 'none' then
       local saved_model = torch.load(opt.loadParams)
       --local saved_params = torch.load(opt.loadParams)

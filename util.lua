@@ -136,13 +136,14 @@ end
 function rand_initialize(layer)
   local tn = torch.type(layer)
   if tn == "cudnn.SpatialConvolution" then
-    local c  = math.sqrt(2.0 / (layer.kH * layer.kW * layer.nInputPlane));
-    layer.weight:copy(torch.randn(layer.weight:size()) * c)
-    layer.bias:fill(0)
+    --local c  = math.sqrt(2.0 / (layer.kH * layer.kW * layer.nInputPlane));
+    --layer.weight:copy(torch.randn(layer.weight:size()) * c)
+    --layer.bias:fill(0)
+     layer.bias:fill(0.01)
   elseif tn == "nn.SpatialConvolution" then
-    local c  = math.sqrt(2.0 / (layer.kH * layer.kW * layer.nInputPlane));
-    layer.weight:copy(torch.randn(layer.weight:size()) * c)
-    layer.bias:fill(0)
+    --local c  = math.sqrt(2.0 / (layer.kH * layer.kW * layer.nInputPlane));
+    --layer.weight:copy(torch.randn(layer.weight:size()) * c)
+     layer.bias:fill(0.01)
   elseif tn == "nn.BinarySpatialConvolution" then
     local c  = math.sqrt(2.0 / (layer.kH * layer.kW * layer.nInputPlane));
     layer.weight:copy(torch.randn(layer.weight:size()) * c)

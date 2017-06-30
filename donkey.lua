@@ -58,10 +58,10 @@ local trainHook = function(self, input)
    if torch.uniform() > 0.5 then out = image.hflip(out) end
 
    -- mean/std
-   for i=1,opt.nChannels do -- channels
-      if mean then out[{{i},{},{}}]:add(-mean[i]) end
-      if std then out[{{i},{},{}}]:div(std[i]) end
-   end
+   --for i=1,opt.nChannels do -- channels
+    --  if mean then out[{{i},{},{}}]:add(-mean[i]) end
+   -- if std then out[{{i},{},{}}]:div(std[i]) end
+   --end
    return out
 end
 
@@ -103,10 +103,10 @@ testHook = function(self, input)
    local h1 = math.ceil((iH-oH)/2)
    local out = image.crop(input, w1, h1, w1+oW, h1+oH) -- center patch
    -- mean/std
-   for i=1,opt.nChannels do -- channels
-      if mean then out[{{i},{},{}}]:add(-mean[i]) end
-      if std then out[{{i},{},{}}]:div(std[i]) end
-   end
+   --for i=1,opt.nChannels do -- channels
+   --if mean then out[{{i},{},{}}]:add(-mean[i]) end
+   --if std then out[{{i},{},{}}]:div(std[i]) end
+   --end
    return out
 end
 

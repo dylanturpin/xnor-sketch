@@ -40,6 +40,8 @@ print('Saving everything to: ' .. opt.save)
 os.execute('mkdir -p ' .. opt.save)
 
 loaded = mattorch.load(opt.data)
+loaded.trainImages = 255 - loaded.trainImages
+loaded.validationImages = 255 - loaded.validationImages
 
 paths.dofile('data.lua')
 paths.dofile('train.lua')
