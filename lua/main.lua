@@ -6,22 +6,30 @@
 --  LICENSE file in the root directory of this source tree. An additional grant
 --  of patent rights can be found in the PATENTS file in the same directory.
 --
-debugger = require('fb.debugger')
+--debugger = require('fb.debugger')
 
 require 'torch'
-require 'cutorch'
 require 'paths'
 require 'xlua'
 require 'optim'
 require 'nn'
-require 'newLayers'
-require 'mattorch'
 
+local options = paths.dofile('opts.lua')
+opt = options.parse(arg)
+
+-- Use 'float' as the default data type
 torch.setdefaulttensortype('torch.FloatTensor')
+torch.manualSeed(options.seed)
 
-local opts = paths.dofile('opts.lua')
 
-opt = opts.parse(arg)
+-- CUDA?
+if opt.gpu > 0 then
+    cuda = true
+    require 'cunn'
+    require 'cutorch'
+    cutorch.setDevice(opt.gpu)
+    cutorch.manualSeed(opt.seed)
+end
 
 nClasses = opt.nClasses
 
@@ -32,9 +40,6 @@ opt.imageSize = model.imageSize or opt.imageSize
 opt.imageCrop = model.imageCrop or opt.imageCrop
 
 print(opt)
-
-cutorch.setDevice(opt.GPU) -- by default, use GPU 1
-torch.manualSeed(opt.manualSeed)
 
 print('Saving everything to: ' .. opt.save)
 os.execute('mkdir -p ' .. opt.save)

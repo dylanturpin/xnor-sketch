@@ -24,36 +24,36 @@ function computeScore(output, target, nCrops)
    return top1 * 100, top5 * 100
 end
 
-function makeDataParallel(model, nGPU)
+--function makeDataParallel(model, nGPU)
 
-   if nGPU > 1 then
-      print('converting module to nn.DataParallelTable')
-      assert(nGPU <= cutorch.getDeviceCount(), 'number of GPUs less than nGPU specified')
-      local model_single = model
-      model = nn.DataParallelTable(1)
-      for i=1, nGPU do
-         cutorch.setDevice(i)
-         model:add(model_single:clone():cuda(), i)
-      end
-   end
-   cutorch.setDevice(opt.GPU)
+--   if nGPU > 1 then
+--      print('converting module to nn.DataParallelTable')
+--      assert(nGPU <= cutorch.getDeviceCount(), 'number of GPUs less than nGPU specified')
+--      local model_single = model
+--      model = nn.DataParallelTable(1)
+--      for i=1, nGPU do
+--         cutorch.setDevice(i)
+--         model:add(model_single:clone():cuda(), i)
+--      end
+--   end
+--   cutorch.setDevice(opt.GPU)
 
-   return model
-end
+--   return model
+--end
 
-local function cleanDPT(module)
-   return module:get(1)
-end
+--local function cleanDPT(module)
+--   return module:get(1)
+--end
 
-function saveDataParallel(filename, model)
-   if torch.type(model) == 'nn.DataParallelTable' then
-      torch.save(filename, cleanDPT(model))
-   elseif torch.type(model) == 'nn.Sequential' then
-      torch.save(filename, model)
-   else
-      error('This saving function only works with Sequential or DataParallelTable modules.')
-   end
-end
+--function saveDataParallel(filename, model)
+--   if torch.type(model) == 'nn.DataParallelTable' then
+--      torch.save(filename, cleanDPT(model))
+--   elseif torch.type(model) == 'nn.Sequential' then
+--      torch.save(filename, model)
+--   else
+--      error('This saving function only works with Sequential or DataParallelTable modules.')
+--   end
+--end
 
 function loadParams(model,saved_model)
     params = model:parameters();
