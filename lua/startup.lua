@@ -10,143 +10,200 @@ require "trepl"
 require "optim"
 require "image"
 require "nn"
+require "networks.lua"
 
 torch.setdefaulttensortype('torch.FloatTensor')
 
 --------------------------------------------------------------------------------
--- Define training and testing functions
+-- Training and testing functions
 --------------------------------------------------------------------------------
 
--- Training code ---------------------------------------------------------------
-function train(data)
-
-    -- Initialize optimState if it has not been loaded from disk
-    if not optimState then
-        optimState = {  learningRate = opts.LR,
-                        learningRateDecay = 0.0,
-                        momentum = opts.momentum,
-                        dampening = 0.0,
-                        weightDecay = opts.weightDecay
-                    }
+-- Define scheme for learning rate, weight decay etc. for each epoch.
+-- By default we follow a known recipe for a 55-epoch training unless 
+-- the user has manually provided a learning rate.
+-- Returns:
+--    diff to apply to optimState,
+--    true IFF this is the first epoch of a new regime
+local function paramsForEpoch(epoch)
+    if opts.LR ~= 0.0 then -- if manually specified
+        return { }
     end
- 
-    -- By default we follow a known recipe for a 55-epoch training unless the
-    -- user has manually provided a learning rate.
-    local function paramsForEpoch(epoch)
-        -- Returns:
-        --    diff to apply to optimState,
-        --    true IFF this is the first epoch of a new regime
-        if opts.LR ~= 0.0 then -- if manually specified
-            return { }
-        end
-        local regimes = {
-            -- start, end,    LR,   WD,
-            {  1,     18,   1e-2,   5e-4, },
-            { 19,     29,   5e-3,   5e-4  },
-            { 30,     43,   1e-3,   0 },
-            { 44,     52,   5e-4,   0 },
-            { 53,    1e8,   1e-4,   0 },
-        }
+    local regimes = {
+        -- start, end,    LR,   WD,
+        {  1,     18,   1e-2,   5e-4, },
+        { 19,     29,   5e-3,   5e-4  },
+        { 30,     43,   1e-3,   0 },
+        { 44,     52,   5e-4,   0 },
+        { 53,    1e8,   1e-4,   0 },
+    }
 
-        for _, row in ipairs(regimes) do
-            if epoch >= row[1] and epoch <= row[2] then
-                return { learningRate=row[3], weightDecay=row[4] }, epoch == row[1]
-            end
+    for _, row in ipairs(regimes) do
+        if epoch >= row[1] and epoch <= row[2] then
+            return { learningRate=row[3], weightDecay=row[4] }, epoch == row[1]
         end
     end
+end
+
+function train(data)     
+    data:split() -- Split data into training and validation sets.
     
-    -- WARNING: This command goes AFTER transfering the network to the GPU!
-    -- Retrieve parameters and gradients:
-    -- extracts and flattens all the trainable parameters of the model into a vector
-    -- Parameters are references: when model:backward is called, these are changed
-    parameters,gradParameters = model:getParameters()
-    realParams = parameters:clone()
-    if cudann then
-        convNodes = model:findModules('cudnn.SpatialConvolution')
-    else
-        convNodes = model:findModules('nn.SpatialConvolution')
-    end
-    
-    
-    -- Get data for training and validation
-    local trainData = data:subset('train')
-    local valData   = data:subset('val')
-    
+    -- Run a round of training and validation for each epoch.
     local trainTimer = torch.Timer()
     while epoch  <= opts.nEpochs do
-        runEpoch('train', trainData)
-        runEpoch('val',   valData)
-
-        if (opts.save > 0 and (epoch % opts.save > 0)) or epoch == opts.nEpochs then
+        trainEpoch(data.train)
+        test(data.val)
+        
+        if epoch == opts.nEpochs  or (opts.save > 0 and (epoch % opts.save == 0)) then
             print('\n==> Saving model (epoch ' .. epoch .. ')...')
             saveState(paths.concat(opts.saveDir, 'model-epoch-' .. epoch .. '.t7'))
         end
+        
+        epoch = epoch + 1
     end
     print('Done training for ' .. opts.numEpochs .. ' epochs!')
     print('Total time for training: '..misc.time2string(trainTimer:time().real))
 end
 
 
+-- Preallocate memory for batches
+local imageBatch, labelBatch
+if cuda then
+    imageBatch = torch.CudaTensor()
+    labelBatch = torch.CudaTensor()
+else
+    imageBatch = torch.FloatTensor()
+    labelBatch = torch.FloatTensor()        
+end
+
+-- Timers for epochs and batches
+local epochTimer = torch.Timer()
+local batchTimer = torch.Timer()
+
 -- Execute a single epoch of training (or validation) -------------------------
-function runEpoch(mode, data)
-    
+function trainEpoch(data)
+    epochTimer:reset()
     local numExamples = data.images:size(1);
     local numBatches = math.ceil(numExamples/opts.batchSize)
-    local lossEpoch = 0, top1Sum = 0, top5Sum = 0
+    local lossEpoch, top1Epoch, top5Epoch = 0,0,0
+    local inds = torch.randperm(numExamples):long() -- used to shuffle data
+    model:training()
+    
 
-    print('\n--------------- ' .. mode .. ' epoch ' .. epoch .. '/' .. opts.numEpochs
-        ..' [#examples = ' .. numExamples .. ', batchSize = ' .. opts.batchSize
-        .. ', #batches: ' .. numBatches .. '] ----------------')
-
-    local inTrainMode = mode == 'train'
-    if inTrainMode then 
-        local params, newRegime = paramsForEpoch(epoch)
-        if newRegime then
-            optimState.learningRate = params.learningRate
-            optimState.weightDecay = params.weightDecay
-            if (opts.optimType == "adam") or (opts.optimType == "adamax") then
-                optimState.learningRate = optimState.learningRate*0.1
-            end
+    local params, newRegime = paramsForEpoch(epoch)
+    if newRegime then
+        optimState.learningRate = params.learningRate
+        optimState.weightDecay = params.weightDecay
+        if (opts.optimType == "adam") or (opts.optimType == "adamax") then
+            optimState.learningRate = optimState.learningRate*0.1
         end
-        print('Optimization parameters:'); print(optimState)
-        model:training()
-        data:shuffle()
-    else 
-        model:evaluate() 
     end
+    print('==> Optimization parameters:'); print(optimState)
+    
 
     -- Train using batches
-    epochTimer = epochTimer or torch.Timer(); epochTimer:reset()
+    batchTimer:reset()
     for t = 1, numExamples, opts.batchSize do
-        local imageBatch, labelBatch = data:batch(t, math.min(t+opts.batchSize-1, numExamples))
-        
-        -- closure to evaluate f(X) and df/dX (L and dL/dw)
+        local indsBatch = inds[{ {t, math.min(t+opts.batchSize-1, numExamples)} }]
+        local images = data.images:index(1, indsBatch) 
+        local labels = data.labels:index(1, indsBatch)
+        -- Copy batch to pre-allocated space
+        imageBatch:resize(images:size()):copy(images)
+        labelBatch:resize(labels:size()):copy(labels)
+
         collectgarbage()
-        local lossBatch = 0
+        if opts.binaryWeight then
+            networks.meancenterConvParms(convNodes)
+            networks.clampConvParms(convNodes)
+            networks.realParams:copy(parameters)
+            networks.binarizeConvParms(convNodes)
+        end 
+        -- Compute loss and gradients on current batch
+        gradParameters:zero()
         local outputBatch = model:forward(imageBatch) -- BxLxDxHxW
+        local lossBatch = criterion:forward(outputBatch,labelBatch)
+        local gradOutput = criterion:backward(outputBatch,labelBatch)
+        model:backward(imageBatch,gradOutput)
+        
+        if opts.binaryWeight then
+            parameters:copy(realParams)
+            networks.updateBinaryGradWeight(convNodes)
+            if opts.optimType == 'adam' then
+                gradParameters:mul(1e+9);
+            end
+        end        
+        
+        -- optimize on current mini-batch        
         local function feval(x)
-            gradParameters:zero()
-            local gradOutput
-            lossBatch, gradOutput = networks.spatialCrossEntropy(outputBatch,labelBatch,weights)
-            model:backward(imageBatch,gradOutput)
             return lossBatch, gradParameters
         end
-        if inTrainMode then -- optimize on current mini-batch
+        if opts.optimType == 'sgd' then
             optim.sgd(feval, parameters, optimState)
+        elseif opts.optimType == 'adam' or opts.optimType == 'adamax' then
+            optim.adam(feval, parameters, optimState)
         end
 
-        -- Print stats for current batch
-        local maxScores,prediction = outputBatch:max(2) -- max score over labels  (B1DHW)
-        prediction, labelBatch = prediction:float():view(-1), labelBatch:float():view(-1)
-        confusion:batchAdd(prediction,labelBatch) --print(confusion)
-        local s, batch = computeErrorStats(prediction,labelBatch), math.ceil(t/opts.batchSize)
-        lossEpoch = lossEpoch + lossBatch
+        -- Compute classification error for current batch
+        local top1Batch,top5Batch = computeErrors(outputBatch:float(),labels:float())
+        local batch = math.ceil(t/opts.batchSize)
+        lossEpoch = lossEpoch + lossBatch    
+        top1Epoch = top1Epoch + top1Batch
+        top5Epoch = top5Epoch + top5Batch        
+        print(('Epoch (training): [%d][%d/%d]\tTime %.3f(%.3f) Loss %.4f '..
+                'Top1-%%: %.2f (%.2f)  Top5-%%: %.2f (%.2f)'):format(
+                epoch, batch, numBatches, epochTimer:time().real,batchTimer:time().real,
+                lossBatch, top1Batch, top1Epoch/batch, top5Batch, top5Epoch/batch))
     end -- for t = 1, numExamples, opts.batchSize
 
-    -- print and reset confusion matrix and timings
-    print(''); print(confusion); confusion:zero() print('')
     print('==> Time for epoch: ' .. misc.time2string(epochTimer:time().real)
         .. ', time per sample: ' .. misc.time2string(epochTimer:time().real/numExamples) )
+end
+
+function test(data)
+    epochTimer:reset()
+    local numExamples = data.images:size(1);
+    local numBatches = math.ceil(numExamples/opts.batchSize)
+    local inds = torch.range(1,numExamples):long()
+    local loss, top1, top5 = 0,0,0
+    model:evaluate()    
+
+    -- Evaluate on batch
+    batchTimer:reset()
+    for t = 1, numExamples, opts.batchSize do
+        local indsBatch = inds[{ {t, math.min(t+opts.batchSize-1, numExamples)} }]
+        local images = data.images:index(1, indsBatch) 
+        local labels = data.labels:index(1, indsBatch)
+        -- Copy batch to pre-allocated space
+        imageBatch:resize(images:size()):copy(images)
+        labelBatch:resize(labels:size()):copy(labels)
+
+        collectgarbage()
+        if opts.binaryWeight then
+            networks.binarizeConvParms(convNodes)
+        end 
+        -- Compute loss and gradients on current batch
+        local outputBatch = model:forward(imageBatch) -- BxLxDxHxW
+        local lossBatch = criterion:forward(outputBatch,labelBatch)
+                
+        -- Compute classification error for current batch
+        local top1Batch,top5Batch = computeErrors(outputBatch:float(),labels:float())
+        local batch = math.ceil(t/opts.batchSize)
+        loss = loss + lossBatch    
+        top1 = top1 + top1Batch
+        top5 = top5 + top5Batch        
+        print(('Epoch (testing): [%d][%d/%d] | Loss: %.4f | '..
+                'top1: [%.2f (%.2f)] | top5: [%.2f (%.2f)]'):format(
+                epoch, batch, numBatches, lossBatch, top1Batch, top1Epoch/batch,
+                top5Batch, top5Epoch/batch))
+    end -- for t = 1, numExamples, opts.batchSize
+    
+    if opts.binaryWeight then
+        parameters:copy(realParams)
+    end        
+    
+    print('==> Time for epoch: ' .. misc.time2string(epochTimer:time().real)
+        .. ', time per sample: ' .. misc.time2string(epochTimer:time().real/numExamples) )
+    
+    
 end
 
 function loadState(modelPath)
@@ -171,18 +228,10 @@ function saveState(modelPath)
 end
 
 
-function computeScore(output, target, nCrops)
-    if nCrops > 1 then
-        -- Sum over crops
-        output = output:view(output:size(1) / nCrops, nCrops, output:size(2))
-        --:exp()
-        :sum(2):squeeze(2)
-    end
-
+function computeErrors(output, target)
     -- Coputes the top1 and top5 error rate
     local batchSize = output:size(1)
-
-    local _ , predictions = output:float():sort(2, true) -- descending
+    local _ , predictions = output:sort(2, true) -- descending
 
     -- Find which predictions match the target
     local correct = predictions:eq(

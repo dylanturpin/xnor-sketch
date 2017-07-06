@@ -1,7 +1,8 @@
 -- Network architectures
-
 local P = {}; networks = P;
 require "nn"
+
+local nClasses = opts.nClasses
 
 -- Commonly used layers - allow easy switch between CPU and GPU
 local Convolution,MaxPooling,ReLU,CrossMapLRN,Dropout,BatchNormalization
@@ -86,9 +87,9 @@ function P.alexnet()
     net:add(ContConvolution(384,384,3,3,1,1,1,1)) 
     net:add(ContConvolution(384,256,3,3,1,1,1,1)) 
     net:add(MaxPooling(3,3,2,2))           
-    net:add(nn.SpatialDropout(opt.dropout))
+    net:add(nn.SpatialDropout(opts.dropout))
     net:add(ContConvolution(256,4096,6,6))
-    net:add(nn.SpatialDropout(opt.dropout))           
+    net:add(nn.SpatialDropout(opts.dropout))           
     net:add(ContConvolution(4096,4096,1,1)) 
     net:add(Convolution(4096, nClasses,1,1))
     net:add(nn.View(nClasses))
@@ -132,7 +133,7 @@ function P.sketchanet()
 
     -- index 0 is input
     -- index 1
-    net:add(Convolution(opt.nChannels,64,15,15,3,3,0,0))      
+    net:add(Convolution(opts.nChannels,64,15,15,3,3,0,0))      
     --net:add(BatchNorm(64,1e-5,false))
     -- index 2
     net:add(ReLU(true))
@@ -190,7 +191,7 @@ function P.sketchanetxnor()
 
     -- index 0 is input
     -- index 1
-    net:add(Convolution(opt.nChannels,64,15,15,3,3,0,0))      
+    net:add(Convolution(opts.nChannels,64,15,15,3,3,0,0))      
     net:add(BatchNorm(64,1e-5,false))
     -- index 2
     net:add(ReLU(true))

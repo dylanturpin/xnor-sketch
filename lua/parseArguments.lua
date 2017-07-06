@@ -13,25 +13,21 @@ cmd:option('-nChannels',       1,       '#channels in the input images')
 cmd:option('-scalingFactor',   0,       '???')
 -- Training options --------------------
 cmd:option('-nEpochs',          55,    'Number of total epochs to run')
-cmd:option('-batchSize',        128,   'mini-batch size (1 = pure stochastic)')
+cmd:option('-batchSize',        1,   'mini-batch size (1 = pure stochastic)')
 cmd:option('-LR',               0.0, 'learning rate; if set, overrides default LR/WD recipe')
 cmd:option('-weightDecay',      5e-4,     'L2 penalty on the weights')
 cmd:option('-momentum',         0.9,      'momentum')
 cmd:option('-seed',             123,      'torch manual random number generator seed')
 cmd:option('-shareGradInput',   true, 'Sharing the gradient memory')
 cmd:option('-binaryWeight',     false, 'Sharing the gradient memory')
-cmd:option('-testOnly',         false, 'Sharing the gradient memory')
 -- Model options ----------------------------------
-cmd:option('-netType',     'alexnet', 'Options: alexnet | overfeat | alexnetowtbn | vgg | googlenet | resnet')
-cmd:option('-optimType',     'sgd', 'Options: sgd | adam')
-cmd:option('-retrain',     'none', 'provide path to model to retrain with')
-cmd:option('-loadParams',  'none', 'provide path to model to load the parameters')
-cmd:option('-optimState',  'none', 'provide path to an optimState to reload from')
-cmd:option('-dropout', 0.5 , 'Dropout ratio')
-cmd:option('-net',                'CADC',   'network architecture')
-cmd:option('-initMethod',         'reset',  'weight initialization method')
-cmd:option('-initWeight',         0.01,     'weight initialization parameter')
-cmd:option('-initBias',           0.01,     'bias initialization parameter')
+cmd:option('-netType',          'sketchanet', 'Options: alexnetxnor | sketchanetxnor| alexnetowtbn | sketchanet')
+cmd:option('-optimType',        'sgd',      'Options: sgd | adam')
+cmd:option('-dropout',          0.5 ,       'Dropout ratio')
+cmd:option('-net',              'CADC',     'network architecture')
+cmd:option('-initMethod',       'reset',    'weight initialization method')
+cmd:option('-initWeight',       0.01,       'weight initialization parameter')
+cmd:option('-initBias',         0.01,       'bias initialization parameter')
 -- Miscellaneous (device and storing options) ---------------------------------
 cmd:text('===> Miscellaneous options')
 cmd:option('-gpu',                0,        'device ID (positive if using CUDA)')
@@ -48,11 +44,12 @@ opts = cmd:parse(arg or {})
 -- We temporarily remove options that are not used to form the saveDir name.
 -- We do the same thing for the the class name, so that it is explicitly placed
 -- at the beginning of the directory name.
-local gpu    = opts.gpu;   opts.gpu   = nil
-local save   = opts.save;  opts.save  = nil
+local gpu       = opts.gpu;   opts.gpu   = nil
+local save      = opts.save;  opts.save  = nil
+local continue  = opts.continue; opts.continue = nil
 opts.saveDir = cmd:string('../output/models', opts, {dir=true})
 paths.mkdir(opts.saveDir)
-opts.gpu = gpu; opts.save = save; 
+opts.gpu = gpu; opts.save = save; opts.continue = continue
 cmd:log(opts.saveDir .. '/log-' .. os.date('%d-%m-%Y-%X') , opts)
 
 ------------------------------------------------------------------------------------
