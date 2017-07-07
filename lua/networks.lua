@@ -176,8 +176,9 @@ function P.sketchanet()
 
     -- index 20
     net:add(Convolution(512,nClasses,1,1,1,1,0,0))      
-
     net:add(nn.View(nClasses))
+--    net:add(nn.View(-1,512))
+--    net:add(nn.Linear(512,nClasses))      
     net:add(nn.LogSoftMax())
 
     return net

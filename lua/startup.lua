@@ -67,12 +67,11 @@ end
 
 -- Preallocate memory for batches
 local imageBatch, labelBatch
+imageBatch = torch.FloatTensor(opts.batchSize,opts.nChannels,opts.cropSize,opts.cropSize)
+labelBatch = torch.FloatTensor(opts.batchSize)
 if cuda then
-    imageBatch = torch.CudaTensor()
-    labelBatch = torch.CudaTensor()
-else
-    imageBatch = torch.FloatTensor()
-    labelBatch = torch.FloatTensor()        
+    imageBatch:cuda()
+    labelBatch:cuda()
 end
 
 -- Timers for epochs and batches
@@ -88,7 +87,6 @@ function trainEpoch(data)
     local inds = torch.randperm(numExamples):long() -- used to shuffle data
     model:training()
     
-
     local params, newRegime = paramsForEpoch(epoch)
     if newRegime then
         optimState.learningRate = params.learningRate
@@ -101,15 +99,15 @@ function trainEpoch(data)
     
 
     -- Train using batches
-    batchTimer:reset()
-    for t = 1, numExamples, opts.batchSize do
-        local indsBatch = inds[{ {t, math.min(t+opts.batchSize-1, numExamples)} }]
-        local images = data.images:index(1, indsBatch) 
-        local labels = data.labels:index(1, indsBatch)
+    for b = 1, numExamples, opts.batchSize do
+        batchTimer:reset()
+        local numExamplesSoFar = math.min(b+opts.batchSize-1, numExamples)
+        local indsBatch = inds[{ {b, numExamplesSoFar} }]
+        local images,labels = getBatch(data,indsBatch,true)
         -- Copy batch to pre-allocated space
         imageBatch:resize(images:size()):copy(images)
         labelBatch:resize(labels:size()):copy(labels)
-
+        
         collectgarbage()
         if opts.binaryWeight then
             networks.meancenterConvParms(convNodes)
@@ -143,19 +141,23 @@ function trainEpoch(data)
         end
 
         -- Compute classification error for current batch
-        local top1Batch,top5Batch = computeErrors(outputBatch:float(),labels:float())
-        local batch = math.ceil(t/opts.batchSize)
+        local batchSize = images:size(1)
+        outputBatch = outputBatch:view(batchSize,-1):float()
+        local top1Batch,top5Batch = computeAccuracy(outputBatch,labels)
+        local batch = math.ceil(b/opts.batchSize)
         lossEpoch = lossEpoch + lossBatch    
         top1Epoch = top1Epoch + top1Batch
         top5Epoch = top5Epoch + top5Batch        
-        print(('Epoch (training): [%d][%d/%d]\tTime %.3f(%.3f) Loss %.4f '..
+        print(('Training Epoch: [%d][%d/%d]\tTime %.3f(%.3f) Loss %.4f '..
                 'Top1-%%: %.2f (%.2f)  Top5-%%: %.2f (%.2f)'):format(
-                epoch, batch, numBatches, epochTimer:time().real,batchTimer:time().real,
-                lossBatch, top1Batch, top1Epoch/batch, top5Batch, top5Epoch/batch))
+                epoch, batch, numBatches, 
+                epochTimer:time().real,batchTimer:time().real,lossBatch, 
+                top1Batch/batchSize*100, top1Epoch/numExamplesSoFar*100, 
+                top5Batch/batchSize*100, top5Epoch/numExamplesSoFar*100))
     end -- for t = 1, numExamples, opts.batchSize
 
-    print('==> Time for epoch: ' .. misc.time2string(epochTimer:time().real)
-        .. ', time per sample: ' .. misc.time2string(epochTimer:time().real/numExamples) )
+    print('==> Time for epoch: ' .. epochTimer:time().real
+        .. ', time per sample: ' .. epochTimer:time().real/numExamples )
 end
 
 function test(data)
@@ -167,11 +169,12 @@ function test(data)
     model:evaluate()    
 
     -- Evaluate on batch
-    batchTimer:reset()
-    for t = 1, numExamples, opts.batchSize do
-        local indsBatch = inds[{ {t, math.min(t+opts.batchSize-1, numExamples)} }]
-        local images = data.images:index(1, indsBatch) 
-        local labels = data.labels:index(1, indsBatch)
+    for b = 1, numExamples, opts.batchSize do
+        batchTimer:reset()
+        local numExamplesSoFar = math.min(b+opts.batchSize-1, numExamples)
+        local indsBatch = inds[{ {b, numExamplesSoFar} }]
+        local images,labels = getBatch(data,indsBatch,false)
+        
         -- Copy batch to pre-allocated space
         imageBatch:resize(images:size()):copy(images)
         labelBatch:resize(labels:size()):copy(labels)
@@ -185,15 +188,19 @@ function test(data)
         local lossBatch = criterion:forward(outputBatch,labelBatch)
                 
         -- Compute classification error for current batch
-        local top1Batch,top5Batch = computeErrors(outputBatch:float(),labels:float())
-        local batch = math.ceil(t/opts.batchSize)
+        local batchSize = images:size(1)
+        outputBatch = outputBatch:view(batchSize,-1):float()
+        local top1Batch,top5Batch = computeAccuracy(outputBatch,labels)
+        local batch = math.ceil(b/opts.batchSize)
         loss = loss + lossBatch    
         top1 = top1 + top1Batch
         top5 = top5 + top5Batch        
-        print(('Epoch (testing): [%d][%d/%d] | Loss: %.4f | '..
-                'top1: [%.2f (%.2f)] | top5: [%.2f (%.2f)]'):format(
-                epoch, batch, numBatches, lossBatch, top1Batch, top1Epoch/batch,
-                top5Batch, top5Epoch/batch))
+        print(('Testing Epoch: [%d][%d/%d]\tTime %.3f(%.3f) Loss %.4f '..
+                'Top1-%%: %.2f (%.2f)  Top5-%%: %.2f (%.2f)'):format(
+                epoch, batch, numBatches, 
+                epochTimer:time().real,batchTimer:time().real,lossBatch, 
+                top1Batch/batchSize*100, top1/numExamplesSoFar*100, 
+                top5Batch/batchSize*100, top5/numExamplesSoFar*100))
     end -- for t = 1, numExamples, opts.batchSize
     
     if opts.binaryWeight then
@@ -204,6 +211,43 @@ function test(data)
         .. ', time per sample: ' .. misc.time2string(epochTimer:time().real/numExamples) )
     
     
+end
+
+function getBatch(data,inds,augment)
+    local augment = augment or false
+    local batchSize = inds:nElement()
+    local labels = data.labels:index(1, inds)
+    
+    -- Remember that jittering must take place in the CPU
+    local images
+    if augment then
+        local iW = opts.imageSize
+        local iH = opts.imageSize
+        local oW = opts.cropSize
+        local oH = opts.cropSize
+        images = torch.FloatTensor(batchSize,opts.nChannels,oH,oW)
+        for i=1,batchSize do
+            -- do random crop
+            local h1 = math.ceil(torch.uniform(1e-2, iH-oH))
+            local w1 = math.ceil(torch.uniform(1e-2, iW-oW))
+            images[i] = image.crop(data.images[i], w1, h1, w1 + oW, h1 + oH);
+            -- roll> 0.45 then rotate between -5 and 5 degrees...
+            if torch.uniform() > 0.45 then
+                local degrees = torch.random(-5,5)
+                images[i] = image.rotate(images[i], math.rad(degrees));
+            end
+            -- do hflip with probability 0.5
+            if torch.uniform() > 0.5 then 
+                image.hflip(images[i],images[i]); 
+            end
+        end
+    else
+        -- Even with no augmentation we still have to (center-) crop images
+        images = data.images:index(1, inds)
+        images = image.crop(images,'c',opts.cropSize,opts.cropSize)
+    end
+
+    return images,labels
 end
 
 function loadState(modelPath)
@@ -228,17 +272,16 @@ function saveState(modelPath)
 end
 
 
-function computeErrors(output, target)
+function computeAccuracy(output, target)
     -- Coputes the top1 and top5 error rate
     local batchSize = output:size(1)
-    local _ , predictions = output:sort(2, true) -- descending
+    local _ , predictions = output:sort(2, true) -- descending (BxC tensor)
 
     -- Find which predictions match the target
-    local correct = predictions:eq(
-        target:long():view(batchSize, 1):expandAs(output))
+    local correct = predictions:eq(target:long():view(batchSize,1):expandAs(output))
 
-    local top1 = correct:narrow(2, 1, 1):sum() / batchSize
-    local top5 = correct:narrow(2, 1, 5):sum() / batchSize
+    local top1 = correct:narrow(2, 1, 1):sum() 
+    local top5 = correct:narrow(2, 1, 5):sum()
 
-    return top1 * 100, top5 * 100
+    return top1, top5
 end
