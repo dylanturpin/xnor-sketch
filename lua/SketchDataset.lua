@@ -54,12 +54,3 @@ function SketchDataset:split()
     self.train.labels = self.train.labels:index(1, shuffle[{ {1,12000} }])
     collectgarbage()
 end
-
--- Data augmentation (takes place only on the training set)
-function SketchDataset:augment()
-   -- Crops
-   
-   -- Rotations
-   
-   -- Horizontal flip
-end

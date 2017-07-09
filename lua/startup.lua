@@ -10,7 +10,10 @@ require "trepl"
 require "optim"
 require "image"
 require "nn"
-require "networks.lua"
+require "SketchDataset"
+require "networks"
+
+dofile('parseArguments.lua')
 
 torch.setdefaulttensortype('torch.FloatTensor')
 
@@ -25,16 +28,19 @@ torch.setdefaulttensortype('torch.FloatTensor')
 --    diff to apply to optimState,
 --    true IFF this is the first epoch of a new regime
 local function paramsForEpoch(epoch)
-    if opts.LR ~= 0.0 then -- if manually specified
+    if not opts.LR  then -- if manually specified
         return { }
     end
-    local regimes = {
+    local LR = opts.LR
+    local WD = opts.weightDecay
+    local regimes = {        
+        
         -- start, end,    LR,   WD,
-        {  1,     18,   1e-2,   5e-4, },
-        { 19,     29,   5e-3,   5e-4  },
-        { 30,     43,   1e-3,   0 },
-        { 44,     52,   5e-4,   0 },
-        { 53,    1e8,   1e-4,   0 },
+        {  1,     50,    LR,     WD },
+        { 51,     100,   LR/2,   WD },
+        { 151,    200,   LR/10,  0  },
+        { 201,    250,   LR/20,  0  },
+        { 251,    1e8,   LR/100, 0  },
     }
 
     for _, row in ipairs(regimes) do
@@ -60,18 +66,19 @@ function train(data)
         
         epoch = epoch + 1
     end
-    print('Done training for ' .. opts.numEpochs .. ' epochs!')
+    print('Done training for ' .. opts.nEpochs .. ' epochs!')
     print('Total time for training: '..misc.time2string(trainTimer:time().real))
 end
 
 
 -- Preallocate memory for batches
 local imageBatch, labelBatch
-imageBatch = torch.FloatTensor(opts.batchSize,opts.nChannels,opts.cropSize,opts.cropSize)
-labelBatch = torch.FloatTensor(opts.batchSize)
 if cuda then
-    imageBatch:cuda()
-    labelBatch:cuda()
+    imageBatch = torch.CudaTensor()
+    labelBatch = torch.CudaTensor()
+else
+    imageBatch = torch.FloatTensor()
+    labelBatch = torch.FloatTensor()
 end
 
 -- Timers for epochs and batches
@@ -107,19 +114,19 @@ function trainEpoch(data)
         -- Copy batch to pre-allocated space
         imageBatch:resize(images:size()):copy(images)
         labelBatch:resize(labels:size()):copy(labels)
-        
+                
         collectgarbage()
         if opts.binaryWeight then
             networks.meancenterConvParms(convNodes)
             networks.clampConvParms(convNodes)
-            networks.realParams:copy(parameters)
+            realParams:copy(parameters)
             networks.binarizeConvParms(convNodes)
         end 
         -- Compute loss and gradients on current batch
         gradParameters:zero()
-        local outputBatch = model:forward(imageBatch) -- BxLxDxHxW
-        local lossBatch = criterion:forward(outputBatch,labelBatch)
-        local gradOutput = criterion:backward(outputBatch,labelBatch)
+        local outputBatch = model:forward(imageBatch) -- BxL
+        local lossBatch   = criterion:forward(outputBatch,labelBatch)
+        local gradOutput  = criterion:backward(outputBatch,labelBatch)
         model:backward(imageBatch,gradOutput)
         
         if opts.binaryWeight then
@@ -131,7 +138,7 @@ function trainEpoch(data)
         end        
         
         -- optimize on current mini-batch        
-        local function feval(x)
+        local function feval()
             return lossBatch, gradParameters
         end
         if opts.optimType == 'sgd' then
@@ -151,7 +158,7 @@ function trainEpoch(data)
         print(('Training Epoch: [%d][%d/%d]\tTime %.3f(%.3f) Loss %.4f '..
                 'Top1-%%: %.2f (%.2f)  Top5-%%: %.2f (%.2f)'):format(
                 epoch, batch, numBatches, 
-                epochTimer:time().real,batchTimer:time().real,lossBatch, 
+                batchTimer:time().real, epochTimer:time().real,lossBatch, 
                 top1Batch/batchSize*100, top1Epoch/numExamplesSoFar*100, 
                 top5Batch/batchSize*100, top5Epoch/numExamplesSoFar*100))
     end -- for t = 1, numExamples, opts.batchSize
@@ -198,7 +205,7 @@ function test(data)
         print(('Testing Epoch: [%d][%d/%d]\tTime %.3f(%.3f) Loss %.4f '..
                 'Top1-%%: %.2f (%.2f)  Top5-%%: %.2f (%.2f)'):format(
                 epoch, batch, numBatches, 
-                epochTimer:time().real,batchTimer:time().real,lossBatch, 
+                batchTimer:time().real, epochTimer:time().real, lossBatch, 
                 top1Batch/batchSize*100, top1/numExamplesSoFar*100, 
                 top5Batch/batchSize*100, top5/numExamplesSoFar*100))
     end -- for t = 1, numExamples, opts.batchSize
@@ -246,8 +253,28 @@ function getBatch(data,inds,augment)
         images = data.images:index(1, inds)
         images = image.crop(images,'c',opts.cropSize,opts.cropSize)
     end
-
+    
+    -- Make sure images and labels are within acceptable range
+    if opts.debug then
+        assert(images:min()>=0 and images:max()<=1)
+        assert(labels:min()>=1 and labels:max()<=opts.nClasses)
+    end
+        
     return images,labels
+end
+
+function computeAccuracy(output, target)
+    -- Coputes the top1 and top5 error rate
+    local batchSize = output:size(1)
+    local _ , predictions = output:sort(2, true) -- descending (BxC tensor)
+
+    -- Find which predictions match the target
+    local correct = predictions:eq(target:long():view(batchSize,1):expandAs(output))
+
+    local top1 = correct:narrow(2, 1, 1):sum() 
+    local top5 = correct:narrow(2, 1, 5):sum()
+
+    return top1, top5
 end
 
 function loadState(modelPath)
@@ -264,24 +291,11 @@ end
 
 function saveState(modelPath)
     -- Clear intermediate and copy to CPU before saving to disk
-    local model = model:clearState():clone():float()
-    local state = { model = model, optimState = optimState,
-        stats = stats, opts = opts, paramRegimes = paramRegimes, 
-        epoch = epoch }
+    local model = model:clearState():float():clone()
+    local state = { model = model, 
+                    optimState = optimState, 
+                    opts = opts, 
+                    epoch = epoch 
+                  }
     torch.save(modelPath, state)
-end
-
-
-function computeAccuracy(output, target)
-    -- Coputes the top1 and top5 error rate
-    local batchSize = output:size(1)
-    local _ , predictions = output:sort(2, true) -- descending (BxC tensor)
-
-    -- Find which predictions match the target
-    local correct = predictions:eq(target:long():view(batchSize,1):expandAs(output))
-
-    local top1 = correct:narrow(2, 1, 1):sum() 
-    local top5 = correct:narrow(2, 1, 5):sum()
-
-    return top1, top5
 end
