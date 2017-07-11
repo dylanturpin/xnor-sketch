@@ -1,8 +1,8 @@
 -- Main script for training sketch networks
 -- TODO: Use optim.Logger (trainLogger)?
--- TODO: Make sure saveState() and loadState() work properly
 -- TODO: Should I also load opts in loadState()?
 -- TODO: change last layer of network to nn.Linear
+-- TODO: Add support for BatchNorm in saveState() and loadState()
 dofile('startup.lua')
 
 -- Load state (model, optimState, epoch) from user-specified file 
@@ -11,6 +11,8 @@ if opts.continue ~= '' then
     print('Loading state from file ' .. opts.continue)
     loadState(opts.continue)
 else
+    print(('Setting up %s network, %s initialization...'):
+        format(opts.netType,opts,initMethod))
     model = networks[opts.netType]()
     model:apply(networks.initialize(opts.initMethod))
     -- Initialize optimState if it has not been loaded from disk
@@ -44,6 +46,7 @@ else
 end
 
 -- Load data and Train
+print('Loading data...')
 local data = SketchDataset('../data/dataset_without_order_info_256.mat')
 train(data)
 

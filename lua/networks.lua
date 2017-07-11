@@ -7,13 +7,11 @@ local Convolution,MaxPooling,ReLU,CrossMapLRN,Dropout,BatchNormalization
 if cudnn then
     Convolution = cudnn.SpatialConvolution
     MaxPooling  = cudnn.SpatialMaxPooling
-    CrossMapLRN = cudnn.SpatialCrossMapLRN
     BatchNorm   = cudnn.SpatialBatchNormalization
     ReLU        = cudnn.ReLU
 else
     Convolution = nn.SpatialConvolution
     MaxPooling  = nn.SpatialMaxPooling
-    CrossMapLRN = nn.SpatialCrossMapLRN
     BatchNorm   = nn.SpatialBatchNormalization
     ReLU        = nn.ReLU    
 end
@@ -105,7 +103,7 @@ end
 -- Sketch-A-Net ----------------------------------------
 function P.sketchnet()
     local function ContConvolution(nInputPlane, nOutputPlane, kW, kH, dW, dH, padW, padH)
-        local C= nn.Sequential()
+        local C = nn.Sequential()
         C:add(Convolution(nInputPlane, nOutputPlane, kW, kH, dW, dH, padW, padH))   
         -- C:add(BatchNorm(nOutputPlane,1e-3))
         C:add(ReLU(true))
@@ -126,10 +124,10 @@ function P.sketchnet()
     net:add(MaxPooling(3,3,2,2))
     -- Layer 6 (fully connected)
     net:add(ContConvolution(256,512,7,7,1,1,0,0))      
-    net:add(nn.Dropout(0.5))
+    net:add(Dropout(0.5))
     -- Layer 7 (fully connected)
     net:add(ContConvolution(512,512,1,1,1,1,0,0))      
-    net:add(nn.Dropout(0.5))
+    net:add(Dropout(0.5))
     -- Layer 8 (classification)
     net:add(Convolution(512,opts.nClasses,1,1,1,1,0,0))      
     net:add(nn.View(opts.nClasses))
@@ -164,10 +162,10 @@ function P.sketchnetxnor()
     net:add(MaxPooling(3,3,2,2))
     -- Layer 6 (fully connected)
     net:add(BinConvolution(256,512,7,7,1,1,0,0))      
-    net:add(nn.Dropout(0.5))
+    net:add(Dropout(0.5))
     -- Layer 7 (fully connected)
     net:add(BinConvolution(512,512,1,1,1,1,0,0))      
-    net:add(nn.Dropout(0.5))
+    net:add(Dropout(0.5))
     -- Layer 8 (classification)
     net:add(BinConvolution(512,opts.nClasses,1,1,1,1,0,0))      
     net:add(nn.View(opts.nClasses))
@@ -252,9 +250,6 @@ function P.initializeGaussian(layer)
     or tn == "cudnn.SpatialConvolution"
     or tn == "nn.BinarySpatialConvolution" 
     or tn == "nn.Linear" then
-        layer.weight:randn(layer.weight:size()):mul(0.01)
-        layer.bias:fill(0.01)
-    elseif tn == "nn.Linear" then
         layer.weight:randn(layer.weight:size()):mul(0.01)
         layer.bias:fill(0.01)
     elseif tn == "nn.SpatialBachNormalization" 

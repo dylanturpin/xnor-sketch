@@ -1,8 +1,8 @@
 -- Load packages and functions.
-
 --------------------------------------------------------------------------------
--- Load modules
---------------------------------------------------------------------------------
+-- Load packages
+-------------------------------------------------------------------------------
+print('Loading packages...')
 require "torch"
 require 'paths'
 require 'xlua'
@@ -10,8 +10,9 @@ require "trepl"
 require "optim"
 require "image"
 require "nn"
-require "SketchDataset"
-require "networks"
+require "SketchDataset" -- data loading class
+require "networks"      -- contains network definitions
+local debugger = require "fb.debugger"
 
 dofile('parseArguments.lua')
 
@@ -33,14 +34,15 @@ local function paramsForEpoch(epoch)
     end
     local LR = opts.LR
     local WD = opts.weightDecay
+    local reg = torch.range(1,opts.nEpochs,math.ceil(opts.nEpochs/6))
     local regimes = {        
         
-        -- start, end,    LR,   WD,
-        {  1,     50,    LR,     WD },
-        { 51,     100,   LR/2,   WD },
-        { 151,    200,   LR/10,  0  },
-        { 201,    250,   LR/20,  0  },
-        { 251,    1e8,   LR/100, 0  },
+        -- start, end,              LR,     WD,
+        {  1,     reg[2]-1,         LR,     WD },
+        { reg[2], reg[3]-1,         LR/2,   WD },
+        { reg[3], reg[4]-1,         LR/10,  0  },
+        { reg[4], reg[5]-1,         LR/20,  0  },
+        { reg[5], opts.nEpochs,     LR/100, 0  },
     }
 
     for _, row in ipairs(regimes) do
@@ -55,19 +57,19 @@ function train(data)
     
     -- Run a round of training and validation for each epoch.
     local trainTimer = torch.Timer()
-    while epoch  <= opts.nEpochs do
+    while epoch <= opts.nEpochs do
         trainEpoch(data.train)
         test(data.val)
         
         if epoch == opts.nEpochs  or (opts.save > 0 and (epoch % opts.save == 0)) then
-            print('\n==> Saving model (epoch ' .. epoch .. ')...')
+            print('\n==> Saving model (epoch ' .. epoch .. ')...\n')
             saveState(paths.concat(opts.saveDir, 'model-epoch-' .. epoch .. '.t7'))
         end
         
         epoch = epoch + 1
     end
-    print('Done training for ' .. opts.nEpochs .. ' epochs!')
-    print('Total time for training: '..misc.time2string(trainTimer:time().real))
+    print('\nDone training for ' .. opts.nEpochs .. ' epochs!')
+    print('Total time for training: '..trainTimer:time().real)
 end
 
 
@@ -87,6 +89,7 @@ local batchTimer = torch.Timer()
 
 -- Execute a single epoch of training (or validation) -------------------------
 function trainEpoch(data)
+    print('==> Starting training for epoch '..epoch)
     epochTimer:reset()
     local numExamples = data.images:size(1);
     local numBatches = math.ceil(numExamples/opts.batchSize)
@@ -102,18 +105,23 @@ function trainEpoch(data)
             optimState.learningRate = optimState.learningRate*0.1
         end
     end
-    print('==> Optimization parameters:'); print(optimState)
+    print('Optimization parameters:'); 
+    print('learningRate: ' .. optimState.learningRate)
+    print('weightDecay: ' .. optimState.weightDecay)
+    print('learningRateDecay: ' .. optimState.learningRateDecay)
+    print('momentum: ' .. optimState.momentum)
+    print('dampening: ' .. optimState.dampening)
     
-
     -- Train using batches
     for b = 1, numExamples, opts.batchSize do
         batchTimer:reset()
         local numExamplesSoFar = math.min(b+opts.batchSize-1, numExamples)
         local indsBatch = inds[{ {b, numExamplesSoFar} }]
-        local images,labels = getBatch(data,indsBatch,true)
+        local images,labels = getBatch(data,indsBatch,opts.augment)
         -- Copy batch to pre-allocated space
         imageBatch:resize(images:size()):copy(images)
         labelBatch:resize(labels:size()):copy(labels)
+--        debugger.enter()
                 
         collectgarbage()
         if opts.binaryWeight then
@@ -148,26 +156,26 @@ function trainEpoch(data)
         end
 
         -- Compute classification error for current batch
-        local batchSize = images:size(1)
+        local batchSize = imageBatch:size(1)
         outputBatch = outputBatch:view(batchSize,-1):float()
         local top1Batch,top5Batch = computeAccuracy(outputBatch,labels)
         local batch = math.ceil(b/opts.batchSize)
         lossEpoch = lossEpoch + lossBatch    
         top1Epoch = top1Epoch + top1Batch
         top5Epoch = top5Epoch + top5Batch        
-        print(('Training Epoch: [%d][%d/%d]\tTime %.3f(%.3f) Loss %.4f '..
+        print(('Training Epoch: [%d][%d/%d]\t %.3fs Loss %.4f '..
                 'Top1-%%: %.2f (%.2f)  Top5-%%: %.2f (%.2f)'):format(
-                epoch, batch, numBatches, 
-                batchTimer:time().real, epochTimer:time().real,lossBatch, 
+                epoch, batch, numBatches, batchTimer:time().real,lossBatch, 
                 top1Batch/batchSize*100, top1Epoch/numExamplesSoFar*100, 
                 top5Batch/batchSize*100, top5Epoch/numExamplesSoFar*100))
     end -- for t = 1, numExamples, opts.batchSize
 
-    print('==> Time for epoch: ' .. epochTimer:time().real
-        .. ', time per sample: ' .. epochTimer:time().real/numExamples )
+    print('Time for epoch: ' .. epochTimer:time().real
+        .. ', time per sample: ' .. epochTimer:time().real/numExamples..'\n')
 end
 
 function test(data)
+    print('==> Starting testing on validation data for epoch '..epoch)
     epochTimer:reset()
     local numExamples = data.images:size(1);
     local numBatches = math.ceil(numExamples/opts.batchSize)
@@ -202,10 +210,9 @@ function test(data)
         loss = loss + lossBatch    
         top1 = top1 + top1Batch
         top5 = top5 + top5Batch        
-        print(('Testing Epoch: [%d][%d/%d]\tTime %.3f(%.3f) Loss %.4f '..
+        print(('Testing Epoch: [%d][%d/%d]\t%.3fs Loss %.4f '..
                 'Top1-%%: %.2f (%.2f)  Top5-%%: %.2f (%.2f)'):format(
-                epoch, batch, numBatches, 
-                batchTimer:time().real, epochTimer:time().real, lossBatch, 
+                epoch, batch, numBatches, batchTimer:time().real, lossBatch, 
                 top1Batch/batchSize*100, top1/numExamplesSoFar*100, 
                 top5Batch/batchSize*100, top5/numExamplesSoFar*100))
     end -- for t = 1, numExamples, opts.batchSize
@@ -214,24 +221,21 @@ function test(data)
         parameters:copy(realParams)
     end        
     
-    print('==> Time for epoch: ' .. misc.time2string(epochTimer:time().real)
-        .. ', time per sample: ' .. misc.time2string(epochTimer:time().real/numExamples) )
+    print('Time for epoch: ' .. epochTimer:time().real
+        .. ', time per sample: ' .. epochTimer:time().real/numExamples..'\n')
     
     
 end
 
 function getBatch(data,inds,augment)
-    local augment = augment or false
     local batchSize = inds:nElement()
     local labels = data.labels:index(1, inds)
     
     -- Remember that jittering must take place in the CPU
     local images
     if augment then
-        local iW = opts.imageSize
-        local iH = opts.imageSize
-        local oW = opts.cropSize
-        local oH = opts.cropSize
+        local iW,iH = opts.imageSize, opts.imageSize
+        local oW,oH = opts.cropSize, opts.cropSize
         images = torch.FloatTensor(batchSize,opts.nChannels,oH,oW)
         for i=1,batchSize do
             -- do random crop
@@ -250,8 +254,9 @@ function getBatch(data,inds,augment)
         end
     else
         -- Even with no augmentation we still have to (center-) crop images
+        local pad = math.ceil((opts.imageSize-opts.cropSize)/2)
         images = data.images:index(1, inds)
-        images = image.crop(images,'c',opts.cropSize,opts.cropSize)
+        images = images:narrow(3,pad,opts.cropSize):narrow(4,pad,opts.cropSize)
     end
     
     -- Make sure images and labels are within acceptable range
@@ -282,7 +287,6 @@ function loadState(modelPath)
     epoch = state.epoch
     optimState = state.optimState
     model = state.model
-    mode:clearState()
     if cuda then -- copy to gpu before using for computations
         model:cuda()
     end
@@ -291,11 +295,16 @@ end
 
 function saveState(modelPath)
     -- Clear intermediate and copy to CPU before saving to disk
-    local model = model:clearState():float():clone()
+    model = model:clearState():float()
     local state = { model = model, 
                     optimState = optimState, 
                     opts = opts, 
                     epoch = epoch 
                   }
     torch.save(modelPath, state)
+    -- Move back to gpu
+    if cuda then
+        model:cuda()
+    end
+    collectgarbage()
 end
